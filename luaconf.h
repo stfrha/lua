@@ -33,7 +33,7 @@
 ** ensure that all software connected to Lua will be compiled with the
 ** same configuration.
 */
-/* #define LUA_32BITS */
+#define LUA_32BITS
 
 
 /*
@@ -724,7 +724,10 @@
 ** without modifying the main part of the file.
 */
 
-
+#if defined(__ANDROID__)
+#define lua_getlocaledecpoint() ('.')
+#define LUA_USE_C89
+#endif
 
 
 
