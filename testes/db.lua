@@ -16,7 +16,7 @@ end
 assert(not debug.gethook())
 
 local testline = 19         -- line where 'test' is defined
-function test (s, l, p)     -- this must be line 19
+local function test (s, l, p)     -- this must be line 19
   collectgarbage()   -- avoid gc during trace
   local function f (event, line)
     assert(event == 'line')
@@ -31,6 +31,7 @@ end
 
 do
   assert(not pcall(debug.getinfo, print, "X"))   -- invalid option
+  assert(not pcall(debug.getinfo, 0, ">"))   -- invalid option
   assert(not debug.getinfo(1000))   -- out of range level
   assert(not debug.getinfo(-1))     -- out of range level
   local a = debug.getinfo(print)
@@ -48,8 +49,17 @@ do
 end
 
 
+--  bug in 5.4.4-5.4.6: activelines in vararg functions
+--  without debug information
+do
+  local func = load(string.dump(load("print(10)"), true))
+  local actl = debug.getinfo(func, "L").activelines
+  assert(#actl == 0)   -- no line info
+end
+
+
 -- test file and string names truncation
-a = "function f () end"
+local a = "function f () end"
 local function dostring (s, x) return load(s, x)() end
 dostring(a)
 assert(debug.getinfo(f).short_src == string.format('[string "%s"]', a))
@@ -71,7 +81,8 @@ dostring(a, string.format("=%s", string.rep('x', 500)))
 assert(string.find(debug.getinfo(f).short_src, "^x*$"))
 dostring(a, "=")
 assert(debug.getinfo(f).short_src == "")
-a = nil; f = nil;
+_G.a = nil; _G.f = nil;
+_G[string.rep("p", 400)] = nil
 
 
 repeat
@@ -119,6 +130,18 @@ else
 end
 ]], {2,3,4,7})
 
+
+test([[
+local function foo()
+end
+foo()
+A = 1
+A = 2
+A = 3
+]], {2, 3, 2, 4, 5, 6})
+_G.A = nil
+
+
 test([[--
 if nil then
   a=1
@@ -162,7 +185,9 @@ test([[for i,v in pairs{'a','b'} do
 end
 ]], {1,2,1,2,1,3})
 
-test([[for i=1,4 do a=1 end]], {1,1,1,1,1})
+test([[for i=1,4 do a=1 end]], {1,1,1,1})
+
+_G.a = nil
 
 
 do   -- testing line info/trace with large gaps in source
@@ -182,6 +207,50 @@ do   -- testing line info/trace with large gaps in source
       test(s, {1, 2 + i, 2 + i + j, 2 + i, 2 + i + j, 3 + i + j})
     end
   end
+end
+_G.a = nil
+
+
+do   -- testing active lines
+  local function checkactivelines (f, lines)
+    local t = debug.getinfo(f, "SL")
+    for _, l in pairs(lines) do
+      l = l + t.linedefined
+      assert(t.activelines[l])
+      t.activelines[l] = undef
+    end
+    assert(next(t.activelines) == nil)   -- no extra lines
+  end
+
+  checkactivelines(function (...)   -- vararg function
+    -- 1st line is empty
+    -- 2nd line is empty
+    -- 3th line is empty
+    local a = 20
+    -- 5th line is empty
+    local b = 30
+    -- 7th line is empty
+  end, {4, 6, 8})
+
+  checkactivelines(function (a)
+    -- 1st line is empty
+    -- 2nd line is empty
+    local a = 20
+    local b = 30
+    -- 5th line is empty
+  end, {3, 4, 6})
+
+  checkactivelines(function (a, b, ...) end, {0})
+
+  checkactivelines(function (a, b)
+  end, {1})
+
+  for _, n in pairs{0, 1, 2, 10, 50, 100, 1000, 10000} do
+    checkactivelines(
+      load(string.format("%s return 1", string.rep("\n", n))),
+      {n + 1})
+  end
+
 end
 
 print'+'
@@ -233,7 +302,6 @@ foo(200, 3, 4)
 local a = {}
 for i = 1, (_soft and 100 or 1000) do a[i] = i end
 foo(table.unpack(a))
-a = nil
 
 
 
@@ -253,9 +321,14 @@ do   -- test hook presence in debug info
   debug.sethook()
   assert(count == 4)
 end
+_ENV.a = nil
 
 
-a = {}; L = nil
+-- hook table has weak keys
+assert(getmetatable(debug.getregistry()._HOOKKEY).__mode == 'k')
+
+
+a = {}; local L = nil
 local glob = 1
 local oldglob = glob
 debug.sethook(function (e,l)
@@ -281,7 +354,7 @@ function f(a,b)
   local _, y = debug.getlocal(1, 2)
   assert(x == a and y == b)
   assert(debug.setlocal(2, 3, "pera") == "AA".."AA")
-  assert(debug.setlocal(2, 4, "maçã") == "B")
+  assert(debug.setlocal(2, 4, "manga") == "B")
   x = debug.getinfo(2)
   assert(x.func == g and x.what == "Lua" and x.name == 'g' and
          x.nups == 2 and string.find(x.source, "^@.*db%.lua$"))
@@ -296,7 +369,7 @@ function foo()
 end; foo()  -- set L
 -- check line counting inside strings and empty lines
 
-_ = 'alo\
+local _ = 'alo\
 alo' .. [[
 
 ]]
@@ -309,9 +382,9 @@ function g (...)
   local arg = {...}
   do local a,b,c; a=math.sin(40); end
   local feijao
-  local AAAA,B = "xuxu", "mamão"
+  local AAAA,B = "xuxu", "abacate"
   f(AAAA,B)
-  assert(AAAA == "pera" and B == "maçã")
+  assert(AAAA == "pera" and B == "manga")
   do
      local B = 13
      local x,y = debug.getlocal(1,5)
@@ -345,14 +418,15 @@ function g(a,b) return (a+1) + f() end
 
 assert(g(0,0) == 30)
  
+_G.f, _G.g = nil
 
 debug.sethook(nil);
-assert(debug.gethook() == nil)
+assert(not debug.gethook())
 
 
 -- minimal tests for setuservalue/getuservalue
 do
-  assert(debug.setuservalue(io.stdin, 10) == nil)
+  assert(not debug.setuservalue(io.stdin, 10))
   local a, b = debug.getuservalue(io.stdin, 10)
   assert(a == nil and not b)
 end
@@ -388,7 +462,7 @@ local function collectlocals (level)
 end
 
 
-X = nil
+local X = nil
 a = {}
 function a:f (a, b, ...) local arg = {...}; local c = 13 end
 debug.sethook(function (e)
@@ -410,7 +484,8 @@ end, "c")
 a:f(1,2,3,4,5)
 assert(X.self == a and X.a == 1   and X.b == 2 and X.c == nil)
 assert(XX == 12)
-assert(debug.gethook() == nil)
+assert(not debug.gethook())
+_G.XX = nil
 
 
 -- testing access to local variables in return hook (bug in 5.2)
@@ -535,6 +610,7 @@ end
 
 debug.sethook()
 
+local g, g1
 
 -- tests for tail calls
 local function f (x)
@@ -580,7 +656,7 @@ h(false)
 debug.sethook()
 assert(b == 2)   -- two tail calls
 
-lim = _soft and 3000 or 30000
+local lim = _soft and 3000 or 30000
 local function foo (x)
   if x==0 then
     assert(debug.getinfo(2).what == "main")
@@ -645,6 +721,11 @@ t = debug.getinfo(1)   -- main
 assert(t.isvararg == true and t.nparams == 0 and t.nups == 1 and
        debug.getupvalue(t.func, 1) == "_ENV")
 
+t = debug.getinfo(math.sin)   -- C function
+assert(t.isvararg == true and t.nparams == 0 and t.nups == 0)
+
+t = debug.getinfo(string.gmatch("abc", "a"))   -- C closure
+assert(t.isvararg == true and t.nparams == 0 and t.nups > 0)
 
 
 
@@ -734,18 +815,24 @@ a, b = coroutine.resume(co, 100)
 assert(a and b == 30)
 
 
--- check traceback of suspended coroutines
+-- check traceback of suspended (or dead with error) coroutines
 
-function f(i) coroutine.yield(i == 0); f(i - 1) end
+function f(i)
+  if i == 0 then error(i)
+  else coroutine.yield(); f(i-1)
+  end
+end
+
 
 co = coroutine.create(function (x) f(x) end)
 a, b = coroutine.resume(co, 3)
 t = {"'coroutine.yield'", "'f'", "in function <"}
-repeat
+while coroutine.status(co) == "suspended" do
   checktraceback(co, t)
   a, b = coroutine.resume(co)
   table.insert(t, 2, "'f'")   -- one more recursive call to 'f'
-until b
+end
+t[1] = "'error'"
 checktraceback(co, t)
 
 
@@ -796,11 +883,12 @@ assert(a+3 == "add" and 3-a == "sub" and a*3 == "mul" and
        -a == "unm" and #a == "len" and a&3 == "band")
 assert(a + 30000 == "add" and a - 3.0 == "sub" and a * 3.0 == "mul" and
        -a == "unm" and #a == "len" and a & 3 == "band")
-assert(a|3 == "bor" and 3~a == "bxor" and a<<3 == "shift" and
-       a>>1 == "shift")
+assert(a|3 == "bor" and 3~a == "bxor" and a<<3 == "shl" and a>>1 == "shr")
 assert (a==b and a.op == "eq")
-assert (a>=b and a.op == "order")
-assert (a>b and a.op == "order")
+assert (a>=b and a.op == "le")
+assert ("x">=a and a.op == "le")
+assert (a>b and a.op == "lt")
+assert (a>10 and a.op == "lt")
 assert(~a == "bnot")
 
 do   -- testing for-iterator name
@@ -817,7 +905,7 @@ do   -- testing debug info for finalizers
 
   -- create a piece of garbage with a finalizer
   setmetatable({}, {__gc = function ()
-    local t = debug.getinfo(2)   -- get callee information
+    local t = debug.getinfo(1)   -- get function information
     assert(t.namewhat == "metamethod")
     name = t.name
   end})
@@ -849,7 +937,7 @@ do
     local cl = countlines(rest)
     -- at most 10 lines in first part, 11 in second, plus '...'
     assert(cl <= 10 + 11 + 1)
-    local brk = string.find(rest, "%.%.%.")
+    local brk = string.find(rest, "%.%.%.\t%(skip")
     if brk then   -- does message have '...'?
       local rest1 = string.sub(rest, 1, brk)
       local rest2 = string.sub(rest, brk, #rest)
@@ -870,7 +958,7 @@ end
 
 
 print("testing debug functions on chunk without debug info")
-prog = [[-- program to be loaded without debug information
+local prog = [[-- program to be loaded without debug information (strip)
 local debug = require'debug'
 local a = 12  -- a local variable
 
@@ -912,6 +1000,23 @@ return a
 local f = assert(load(string.dump(load(prog), true)))
 
 assert(f() == 13)
+
+do   -- bug in 5.4.0: line hooks in stripped code
+  local function foo ()
+    local a = 1
+    local b = 2
+    return b
+  end
+
+  local s = load(string.dump(foo, true))
+  local line = true
+  debug.sethook(function (e, l)
+    assert(e == "line")
+    line = l
+  end, "l")
+  assert(s() == 2); debug.sethook(nil)
+  assert(line == nil)  -- hook called withoug debug info for 1st instruction
+end
 
 do   -- tests for 'source' in binary dumps
   local prog = [[

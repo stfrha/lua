@@ -14,21 +14,27 @@
 
 #include "lua.h"
 
+
 /*
-** 'lu_mem' and 'l_mem' are unsigned/signed integers big enough to count
-** the total memory used by Lua (in bytes). Usually, 'size_t' and
+** 'lu_mem' is an unsigned integer big enough to count the total memory
+** used by Lua (in bytes). 'l_obj' is a signed integer big enough to
+** count the total number of objects used by Lua. (It is signed due
+** to the use of debt in several computations.)  Usually, 'size_t' and
 ** 'ptrdiff_t' should work, but we use 'long' for 16-bit machines.
 */
 #if defined(LUAI_MEM)		/* { external definitions? */
 typedef LUAI_UMEM lu_mem;
-typedef LUAI_MEM l_mem;
-#elif LUAI_BITSINT >= 32	/* }{ */
+typedef LUAI_MEM l_obj;
+#elif LUAI_IS32INT	/* }{ */
 typedef size_t lu_mem;
-typedef ptrdiff_t l_mem;
+typedef ptrdiff_t l_obj;
 #else  /* 16-bit ints */	/* }{ */
 typedef unsigned long lu_mem;
-typedef long l_mem;
+typedef long l_obj;
 #endif				/* } */
+
+#define MAX_LOBJ  \
+	cast(l_obj, (cast(lu_mem, 1) << (sizeof(l_obj) * CHAR_BIT - 1)) - 1)
 
 
 /* chars used as small naturals (so that 'char' is reserved for characters) */
@@ -39,14 +45,12 @@ typedef signed char ls_byte;
 /* maximum value for size_t */
 #define MAX_SIZET	((size_t)(~(size_t)0))
 
-/* maximum size visible for Lua (must be representable in a lua_Integer */
+/*
+** Maximum size for strings and userdata visible for Lua (should be
+** representable in a lua_Integer)
+*/
 #define MAX_SIZE	(sizeof(size_t) < sizeof(lua_Integer) ? MAX_SIZET \
                           : (size_t)(LUA_MAXINTEGER))
-
-
-#define MAX_LUMEM	((lu_mem)(~(lu_mem)0))
-
-#define MAX_LMEM	((l_mem)(MAX_LUMEM >> 1))
 
 
 #define MAX_INT		INT_MAX  /* maximum value of an int */
@@ -56,7 +60,7 @@ typedef signed char ls_byte;
 ** floor of the log2 of the maximum signed value for integral type 't'.
 ** (That is, maximum 'n' such that '2^n' fits in the given signed type.)
 */
-#define log2maxs(t)	(sizeof(t) * 8 - 2)
+#define log2maxs(t)	cast_int(sizeof(t) * 8 - 2)
 
 
 /*
@@ -65,12 +69,29 @@ typedef signed char ls_byte;
 #define ispow2(x)	(((x) & ((x) - 1)) == 0)
 
 
+/* number of chars of a literal string without the ending \0 */
+#define LL(x)   (sizeof(x)/sizeof(char) - 1)
+
+
 /*
-** conversion of pointer to unsigned integer:
-** this is for hashing only; there is no problem if the integer
-** cannot hold the whole pointer value
+** conversion of pointer to unsigned integer: this is for hashing only;
+** there is no problem if the integer cannot hold the whole pointer
+** value. (In strict ISO C this may cause undefined behavior, but no
+** actual machine seems to bother.)
 */
-#define point2uint(p)	((unsigned int)((size_t)(p) & UINT_MAX))
+#if !defined(LUA_USE_C89) && defined(__STDC_VERSION__) && \
+    __STDC_VERSION__ >= 199901L
+#include <stdint.h>
+#if defined(UINTPTR_MAX)  /* even in C99 this type is optional */
+#define L_P2I	uintptr_t
+#else  /* no 'intptr'? */
+#define L_P2I	uintmax_t  /* use the largest available integer */
+#endif
+#else  /* C89 option */
+#define L_P2I	size_t
+#endif
+
+#define point2uint(p)	cast_uint((L_P2I)(p) & UINT_MAX)
 
 
 
@@ -79,7 +100,15 @@ typedef LUAI_UACNUMBER l_uacNumber;
 typedef LUAI_UACINT l_uacInt;
 
 
-/* internal assertions for in-house debugging */
+/*
+** Internal assertions for in-house debugging
+*/
+#if defined LUAI_ASSERT
+#undef NDEBUG
+#include <assert.h>
+#define lua_assert(c)           assert(c)
+#endif
+
 #if defined(lua_assert)
 #define check_exp(c,e)		(lua_assert(c), (e))
 /* to avoid problems with conditions too long */
@@ -94,7 +123,7 @@ typedef LUAI_UACINT l_uacInt;
 ** assertion for checking API calls
 */
 #if !defined(luai_apicheck)
-#define luai_apicheck(l,e)	lua_assert(e)
+#define luai_apicheck(l,e)	((void)l, lua_assert(e))
 #endif
 
 #define api_check(l,e,msg)	luai_apicheck(l,(e) && msg)
@@ -137,22 +166,6 @@ typedef LUAI_UACINT l_uacInt;
 
 
 /*
-** macros to improve jump prediction (used mainly for error handling)
-*/
-#if !defined(likely)
-
-#if defined(__GNUC__)
-#define likely(x)	(__builtin_expect(((x) != 0), 1))
-#define unlikely(x)	(__builtin_expect(((x) != 0), 0))
-#else
-#define likely(x)	(x)
-#define unlikely(x)	(x)
-#endif
-
-#endif
-
-
-/*
 ** non-return type
 */
 #if !defined(l_noret)
@@ -169,21 +182,24 @@ typedef LUAI_UACINT l_uacInt;
 
 
 /*
-** maximum depth for nested C calls and syntactical nested non-terminals
-** in a program. (Value must fit in an unsigned short int. It must also
-** be compatible with the size of the C stack.)
+** Inline functions
 */
-#if !defined(LUAI_MAXCCALLS)
-#define LUAI_MAXCCALLS		2200
+#if !defined(LUA_USE_C89)
+#define l_inline	inline
+#elif defined(__GNUC__)
+#define l_inline	__inline__
+#else
+#define l_inline	/* empty */
 #endif
 
+#define l_sinline	static l_inline
 
 
 /*
 ** type for virtual-machine instructions;
 ** must be an unsigned with (at least) 4 bytes (see details in lopcodes.h)
 */
-#if LUAI_BITSINT >= 32
+#if LUAI_IS32INT
 typedef unsigned int l_uint32;
 #else
 typedef unsigned long l_uint32;
@@ -229,6 +245,17 @@ typedef l_uint32 Instruction;
 /* minimum size for string buffer */
 #if !defined(LUA_MINBUFFER)
 #define LUA_MINBUFFER	32
+#endif
+
+
+/*
+** Maximum depth for nested C calls, syntactical nested non-terminals,
+** and other features implemented through recursion in C. (Value must
+** fit in a 16-bit unsigned integer. It must also be compatible with
+** the size of the C stack.)
+*/
+#if !defined(LUAI_MAXCCALLS)
+#define LUAI_MAXCCALLS		200
 #endif
 
 
@@ -313,7 +340,8 @@ typedef l_uint32 Instruction;
 
 /* exponentiation */
 #if !defined(luai_numpow)
-#define luai_numpow(L,a,b)      ((void)L, l_mathop(pow)(a,b))
+#define luai_numpow(L,a,b)  \
+  ((void)L, (b == 2) ? (a)*(a) : l_mathop(pow)(a,b))
 #endif
 
 /* the others are quite standard operations */
@@ -325,6 +353,8 @@ typedef l_uint32 Instruction;
 #define luai_numeq(a,b)         ((a)==(b))
 #define luai_numlt(a,b)         ((a)<(b))
 #define luai_numle(a,b)         ((a)<=(b))
+#define luai_numgt(a,b)         ((a)>(b))
+#define luai_numge(a,b)         ((a)>=(b))
 #define luai_numisnan(a)        (!luai_numeq((a), (a)))
 #endif
 
@@ -340,14 +370,14 @@ typedef l_uint32 Instruction;
 #else
 /* realloc stack keeping its size */
 #define condmovestack(L,pre,pos)  \
-  { int sz_ = (L)->stacksize; pre; luaD_reallocstack((L), sz_, 0); pos; }
+  { int sz_ = stacksize(L); pre; luaD_reallocstack((L), sz_, 0); pos; }
 #endif
 
 #if !defined(HARDMEMTESTS)
 #define condchangemem(L,pre,pos)	((void)0)
 #else
 #define condchangemem(L,pre,pos)  \
-	{ if (G(L)->gcrunning) { pre; luaC_fullgc(L, 0); pos; } }
+	{ if (gcrunning(G(L))) { pre; luaC_fullgc(L, 0); pos; } }
 #endif
 
 #endif

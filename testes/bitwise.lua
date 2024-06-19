@@ -38,12 +38,29 @@ d = d << 32
 assert(a | b ~ c & d == 0xF4000000 << 32)
 assert(~~a == a and ~a == -1 ~ a and -d == ~d + 1)
 
+
+do   -- constant folding
+  local code = string.format("return -1 >> %d", math.maxinteger)
+  assert(load(code)() == 0)
+  local code = string.format("return -1 >> %d", math.mininteger)
+  assert(load(code)() == 0)
+  local code = string.format("return -1 << %d", math.maxinteger)
+  assert(load(code)() == 0)
+  local code = string.format("return -1 << %d", math.mininteger)
+  assert(load(code)() == 0)
+end
+
 assert(-1 >> 1 == (1 << (numbits - 1)) - 1 and 1 << 31 == 0x80000000)
 assert(-1 >> (numbits - 1) == 1)
 assert(-1 >> numbits == 0 and
        -1 >> -numbits == 0 and
        -1 << numbits == 0 and
        -1 << -numbits == 0)
+
+assert(1 >> math.mininteger == 0)
+assert(1 >> math.maxinteger == 0)
+assert(1 << math.mininteger == 0)
+assert(1 << math.maxinteger == 0)
 
 assert((2^30 - 1) << 2^30 == 0)
 assert((2^30 - 1) >> 2^30 == 0)
@@ -60,9 +77,9 @@ assert("1234.0" << "5.0" == 1234 * 32)
 assert("0xffff.0" ~ "0xAAAA" == 0x5555)
 assert(~"0x0.000p4" == -1)
 
-assert("7" .. 3 << 1 == 146)
-assert(10 >> 1 .. "9" == 0)
-assert(10 | 1 .. "9" == 27)
+assert(("7" .. 3) << 1 == 146)
+assert(0xffffffff >> (1 .. "9") == 0x1fff)
+assert(10 | (1 .. "9") == 27)
 
 do
   local st, msg = pcall(function () return 4 & "a" end)

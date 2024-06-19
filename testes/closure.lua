@@ -4,7 +4,7 @@
 print "testing closures"
 
 local A,B = 0,{g=10}
-function f(x)
+local function f(x)
   local a = {}
   for i=1,1000 do
     local y = 0
@@ -60,35 +60,33 @@ end
 -- testing closures with 'for' control variable
 a = {}
 for i=1,10 do
-  a[i] = {set = function(x) i=x end, get = function () return i end}
+  a[i] = function () return i end
   if i == 3 then break end
 end
 assert(a[4] == undef)
-a[1].set(10)
-assert(a[2].get() == 2)
-a[2].set('a')
-assert(a[3].get() == 3)
-assert(a[2].get() == 'a')
+assert(a[2]() == 2)
+assert(a[3]() == 3)
 
 a = {}
 local t = {"a", "b"}
 for i = 1, #t do
   local k = t[i]
-  a[i] = {set = function(x, y) i=x; k=y end,
+  a[i] = {set = function(x) k=x end,
           get = function () return i, k end}
   if i == 2 then break end
 end
-a[1].set(10, 20)
+a[1].set(10)
 local r,s = a[2].get()
 assert(r == 2 and s == 'b')
 r,s = a[1].get()
-assert(r == 10 and s == 20)
-a[2].set('a', 'b')
+assert(r == 1 and s == 10)
+a[2].set('a')
 r,s = a[2].get()
-assert(r == "a" and s == "b")
+assert(r == 2 and s == "a")
 
 
 -- testing closures with 'for' control variable x break
+local f
 for i=1,3 do
   f = function () return i end
   break
@@ -139,7 +137,7 @@ assert(b('get') == 'xuxu')
 b('set', 10); assert(b('get') == 14)
 
 
-local w
+local y, w
 -- testing multi-level closure
 function f(x)
   return function (y)
@@ -230,6 +228,7 @@ t()
 -- test for debug manipulation of upvalues
 local debug = require'debug'
 
+local foo1, foo2, foo3
 do
   local a , b, c = 3, 5, 7
   foo1 = function () return a+b end;
@@ -242,7 +241,7 @@ end
 
 assert(debug.upvalueid(foo1, 1))
 assert(debug.upvalueid(foo1, 2))
-assert(not pcall(debug.upvalueid, foo1, 3))
+assert(not debug.upvalueid(foo1, 3))
 assert(debug.upvalueid(foo1, 1) == debug.upvalueid(foo2, 2))
 assert(debug.upvalueid(foo1, 2) == debug.upvalueid(foo2, 1))
 assert(debug.upvalueid(foo3, 1))

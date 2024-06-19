@@ -3,10 +3,6 @@
 
 print "testing (parts of) table library"
 
-print "testing unpack"
-
-local unpack = table.unpack
-
 local maxI = math.maxinteger
 local minI = math.mininteger
 
@@ -17,10 +13,42 @@ local function checkerror (msg, f, ...)
 end
 
 
+do print "testing 'table.create'"
+  local N = 10000
+  collectgarbage()
+  local m = collectgarbage("count") * 1024
+  local t = table.create(N)
+  local memdiff = collectgarbage("count") * 1024 - m
+  assert(memdiff > N * 4)
+  for i = 1, 20 do
+    assert(#t == i - 1)
+    t[i] = 0
+  end
+  for i = 1, 20 do  t[#t + 1] = i * 10  end
+  assert(#t == 40 and t[39] == 190)
+  assert(not T or T.querytab(t) == N)
+  t = nil
+  collectgarbage()
+  m = collectgarbage("count") * 1024
+  t = table.create(0, 1024)
+  memdiff = collectgarbage("count") * 1024 - m
+  assert(memdiff > 1024 * 12)
+  assert(not T or select(2, T.querytab(t)) == 1024)
+
+  checkerror("table overflow", table.create, (1<<31) + 1)
+  checkerror("table overflow", table.create, 0, (1<<31) + 1)
+end
+
+
+print "testing unpack"
+
+local unpack = table.unpack
+
+
 checkerror("wrong number of arguments", table.insert, {}, 2, 3, 4)
 
 local x,y,z,a,n
-a = {}; lim = _soft and 200 or 2000
+a = {}; local lim = _soft and 200 or 2000
 for i=1, lim do a[i]=i end
 assert(select(lim, unpack(a)) == lim and select('#', unpack(a)) == lim)
 x = unpack(a)
@@ -222,7 +250,7 @@ a = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep",
 table.sort(a)
 check(a)
 
-function perm (s, n)
+local function perm (s, n)
   n = n or #s
   if n == 1 then
     local t = {unpack(s)}
@@ -248,7 +276,7 @@ perm{1,2,3,3,5}
 perm{1,2,3,4,5,6}
 perm{2,2,3,3,5,6}
 
-function timesort (a, n, func, msg, pre)
+local function timesort (a, n, func, msg, pre)
   local x = os.clock()
   table.sort(a, func)
   x = (os.clock() - x) * 1000
@@ -257,7 +285,7 @@ function timesort (a, n, func, msg, pre)
   check(a, func)
 end
 
-limit = 50000
+local limit = 50000
 if _soft then limit = 5000 end
 
 a = {}
@@ -274,7 +302,7 @@ for i=1,limit do
   a[i] = math.random()
 end
 
-x = os.clock(); i=0
+local x = os.clock(); local i = 0
 table.sort(a, function(x,y) i=i+1; return y<x end)
 x = (os.clock() - x) * 1000
 print(string.format("Invert-sorting other %d elements in %.2f msec., with %i comparisons",
@@ -289,18 +317,19 @@ timesort(a, limit,  function(x,y) return nil end, "equal")
 
 for i,v in pairs(a) do assert(v == false) end
 
-A = {"álo", "\0first :-)", "alo", "then this one", "45", "and a new"}
-table.sort(A)
-check(A)
+AA = {"\xE1lo", "\0first :-)", "alo", "then this one", "45", "and a new"}
+table.sort(AA)
+check(AA)
 
-table.sort(A, function (x, y)
-          load(string.format("A[%q] = ''", x), "")()
+table.sort(AA, function (x, y)
+          load(string.format("AA[%q] = ''", x), "")()
           collectgarbage()
           return x<y
         end)
 
+_G.AA = nil
 
-tt = {__lt = function (a,b) return a.val < b.val end}
+local tt = {__lt = function (a,b) return a.val < b.val end}
 a = {}
 for i=1,10 do  a[i] = {val=math.random(100)}; setmetatable(a[i], tt); end
 table.sort(a)

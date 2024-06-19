@@ -18,6 +18,8 @@ assert(collectgarbage("incremental") == "generational")
 assert(collectgarbage("incremental") == "incremental")
 
 
+local function nop () end
+
 local function gcinfo ()
   return collectgarbage"count" * 1024
 end
@@ -25,24 +27,50 @@ end
 
 -- test weird parameters to 'collectgarbage'
 do
-  -- save original parameters
-  local a = collectgarbage("setpause", 200)
-  local b = collectgarbage("setstepmul", 200)
+  collectgarbage("incremental")
+  local opause = collectgarbage("param", "pause", 100)
+  local ostepmul = collectgarbage("param", "stepmul", 100)
+  assert(collectgarbage("param", "pause") == 100)
+  assert(collectgarbage("param", "stepmul") == 100)
   local t = {0, 2, 10, 90, 500, 5000, 30000, 0x7ffffffe}
   for i = 1, #t do
-    local p = t[i]
+    collectgarbage("param", "pause", t[i])
     for j = 1, #t do
-      local m = t[j]
-      collectgarbage("setpause", p)
-      collectgarbage("setstepmul", m)
-      collectgarbage("step", 0)
-      collectgarbage("step", 10000)
+      collectgarbage("param", "stepmul", t[j])
+      collectgarbage("step", t[j])
     end
   end
   -- restore original parameters
-  collectgarbage("setpause", a)
-  collectgarbage("setstepmul", b)
+  collectgarbage("param", "pause", opause)
+  collectgarbage("param", "stepmul", ostepmul)
   collectgarbage()
+end
+
+
+--
+-- test the "size" of basic GC steps (whatever they mean...)
+--
+do  print("steps")
+
+  local function dosteps (siz)
+    collectgarbage()
+    local a = {}
+    for i=1,100 do a[i] = {{}}; local b = {} end
+    local x = gcinfo()
+    local i = 0
+    repeat   -- do steps until it completes a collection cycle
+      i = i+1
+    until collectgarbage("step", siz)
+    assert(gcinfo() < x)
+    return i    -- number of steps
+  end
+
+  collectgarbage"stop"
+
+  if not _port then
+    assert(dosteps(10) < dosteps(2))
+  end
+
 end
 
 
@@ -97,40 +125,33 @@ local function GC()  GC1(); GC2() end
 do
   print("creating many objects")
 
-  local contCreate = 0
-
   local limit = 5000
 
-  while contCreate <= limit do
+  for i = 1, limit do
     local a = {}; a = nil
-    contCreate = contCreate+1
   end
 
   local a = "a"
 
-  contCreate = 0
-  while contCreate <= limit do
-    a = contCreate .. "b";
-    a = string.gsub(a, '(%d%d*)', string.upper)
+  for i = 1, limit do
+    a = i .. "b";
+    a = string.gsub(a, '(%d%d*)', "%1 %1")
     a = "a"
-    contCreate = contCreate+1
   end
 
 
-  contCreate = 0
 
   a = {}
 
   function a:test ()
-    while contCreate <= limit do
-      load(string.format("function temp(a) return 'a%d' end", contCreate), "")()
-      assert(temp() == string.format('a%d', contCreate))
-      contCreate = contCreate+1
+    for i = 1, limit do
+      load(string.format("function temp(a) return 'a%d' end", i), "")()
+      assert(temp() == string.format('a%d', i))
     end
   end
 
   a:test()
-
+  _G.temp = nil
 end
 
 
@@ -139,7 +160,7 @@ do local f = function () end end
 
 
 print("functions with errors")
-prog = [[
+local prog = [[
 do
   a = 10;
   function foo(x,y)
@@ -158,61 +179,24 @@ do
     end
   end
 end
+rawset(_G, "a", nil)
+_G.x = nil
 
-foo = nil
-print('long strings')
-x = "01234567890123456789012345678901234567890123456789012345678901234567890123456789"
-assert(string.len(x)==80)
-s = ''
-n = 0
-k = math.min(300, (math.maxinteger // 80) // 2)
-while n < k do s = s..x; n=n+1; j=tostring(n)  end
-assert(string.len(s) == k*80)
-s = string.sub(s, 1, 10000)
-s, i = string.gsub(s, '(%d%d%d%d)', '')
-assert(i==10000 // 4)
-s = nil
-x = nil
-
-assert(_G["while"] == 234)
-
-
---
--- test the "size" of basic GC steps (whatever they mean...)
---
 do
-print("steps")
+  foo = nil
+  print('long strings')
+  local x = "01234567890123456789012345678901234567890123456789012345678901234567890123456789"
+  assert(string.len(x)==80)
+  local s = ''
+  local k = math.min(300, (math.maxinteger // 80) // 2)
+  for n = 1, k do s = s..x; local j=tostring(n)  end
+  assert(string.len(s) == k*80)
+  s = string.sub(s, 1, 10000)
+  local s, i = string.gsub(s, '(%d%d%d%d)', '')
+  assert(i==10000 // 4)
 
-  print("steps (2)")
-
-  local function dosteps (siz)
-    collectgarbage()
-    local a = {}
-    for i=1,100 do a[i] = {{}}; local b = {} end
-    local x = gcinfo()
-    local i = 0
-    repeat   -- do steps until it completes a collection cycle
-      i = i+1
-    until collectgarbage("step", siz)
-    assert(gcinfo() < x)
-    return i    -- number of steps
-  end
-
-  collectgarbage"stop"
-
-  if not _port then
-    assert(dosteps(10) < dosteps(2))
-  end
-
-  -- collector should do a full collection with so many steps
-  assert(dosteps(20000) == 1)
-  assert(collectgarbage("step", 20000) == true)
-  assert(collectgarbage("step", 20000) == true)
-
-  assert(not collectgarbage("isrunning"))
-  collectgarbage"restart"
-  assert(collectgarbage("isrunning"))
-
+  assert(_G["while"] == 234)
+  _G["while"] = nil
 end
 
 
@@ -233,8 +217,8 @@ end
 
 
 print("clearing tables")
-lim = 15
-a = {}
+local lim = 15
+local a = {}
 -- fill a with `collectable' indices
 for i=1,lim do a[{}] = i end
 b = {}
@@ -375,9 +359,10 @@ if T then
     s[n] = i
   end
 
+  warn("@on"); warn("@store")
   collectgarbage()
-  assert(string.find(_WARN, "error in __gc metamethod"))
-  assert(string.match(_WARN, "@(.-)@") == "expected")
+  assert(string.find(_WARN, "error in __gc"))
+  assert(string.match(_WARN, "@(.-)@") == "expected"); _WARN = false
   for i = 8, 10 do assert(s[i]) end
 
   for i = 1, 5 do
@@ -388,7 +373,8 @@ if T then
   collectgarbage()
   for i = 1, 10 do assert(s[i]) end
 
-  getmetatable(u).__gc = false
+  getmetatable(u).__gc = nil
+  warn("@normal")
 
 end
 print '+'
@@ -461,10 +447,7 @@ do   -- tests for string keys in weak tables
   a[string.rep("a", 2^22)] = 25   -- long string key -> number value
   a[string.rep("b", 2^22)] = {}   -- long string key -> colectable value
   a[{}] = 14                     -- colectable key
-  assert(collectgarbage("count") > m + 2^13)    -- 2^13 == 2 * 2^22 in KB
   collectgarbage()
-  assert(collectgarbage("count") >= m + 2^12 and
-        collectgarbage("count") < m + 2^13)    -- one key was collected
   local k, v = next(a)   -- string key with number value preserved
   assert(k == string.rep("a", 2^22) and v == 25)
   assert(next(a, k) == nil)  -- everything else cleared
@@ -481,9 +464,12 @@ end
 
 -- errors during collection
 if T then
+  warn("@store")
   u = setmetatable({}, {__gc = function () error "@expected error" end})
   u = nil
   collectgarbage()
+  assert(string.find(_WARN, "@expected error")); _WARN = false
+  warn("@normal")
 end
 
 
@@ -547,12 +533,13 @@ end
 do
   collectgarbage()
   collectgarbage"stop"
-  collectgarbage("step", 0)   -- steps should not unblock the collector
+  collectgarbage("step")   -- steps should not unblock the collector
   local x = gcinfo()
   repeat
     for i=1,1000 do _ENV.a = {} end   -- no collection during the loop
   until gcinfo() > 2 * x
   collectgarbage"restart"
+  _ENV.a = nil
 end
 
 
@@ -604,8 +591,8 @@ if T then
   collectgarbage("stop")
   local x = T.newuserdata(0)
   local y = T.newuserdata(0)
-  debug.setmetatable(y, {__gc = true})   -- bless the new udata before...
-  debug.setmetatable(x, {__gc = true})   -- ...the old one
+  debug.setmetatable(y, {__gc = nop})   -- bless the new udata before...
+  debug.setmetatable(x, {__gc = nop})   -- ...the old one
   assert(T.gccolor(y) == "white")
   T.checkmemory()
   collectgarbage("restart")
@@ -631,6 +618,7 @@ if T then
   assert(T.totalmem("thread") == t + 1)
 end
 
+
 -- create an object to be collected when state is closed
 do
   local setmetatable,assert,type,print,getmetatable =
@@ -640,7 +628,7 @@ do
     assert(getmetatable(o) == tt)
     -- create new objects during GC
     local a = 'xuxu'..(10+3)..'joao', {}
-    ___Glob = o  -- ressurect object!
+    ___Glob = o  -- ressurrect object!
     setmetatable({}, tt)  -- creates a new one with same metatable
     print(">>> closing state " .. "<<<\n")
   end
@@ -650,20 +638,21 @@ end
 
 -- create several objects to raise errors when collected while closing state
 if T then
-  local error, assert, warn, find = error, assert, warn, string.find
+  local error, assert, find, warn = error, assert, string.find, warn
   local n = 0
   local lastmsg
   local mt = {__gc = function (o)
     n = n + 1
     assert(n == o[1])
     if n == 1 then
-      _WARN = nil
+      _WARN = false
     elseif n == 2 then
       assert(find(_WARN, "@expected warning"))
       lastmsg = _WARN    -- get message from previous error (first 'o')
     else
       assert(lastmsg == _WARN)  -- subsequent error messages are equal
     end
+    warn("@store"); _WARN = false
     error"@expected warning"
   end}
   for i = 10, 1, -1 do
@@ -674,6 +663,16 @@ end
 
 -- just to make sure
 assert(collectgarbage'isrunning')
+
+do    -- check that the collector is not reentrant in incremental mode
+  local res = true
+  setmetatable({}, {__gc = function ()
+    res = collectgarbage()
+  end})
+  collectgarbage()
+  assert(not res)
+end
+
 
 collectgarbage(oldmode)
 

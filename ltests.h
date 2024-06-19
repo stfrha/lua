@@ -20,18 +20,8 @@
 
 
 /* turn on assertions */
-#undef NDEBUG
-#include <assert.h>
-#define lua_assert(c)           assert(c)
+#define LUAI_ASSERT
 
-
-/* include opcode names */
-#define LUAI_DEFOPNAMES
-
-
-/* compiled with -O0, Lua uses a lot of C stack space... */
-#undef LUAI_MAXCCALLS
-#define LUAI_MAXCCALLS	400
 
 /* to avoid warnings, and to make sure value is really unused */
 #define UNUSED(x)       (x=0, (void)(x))
@@ -56,12 +46,13 @@
 
 /* memory-allocator control variables */
 typedef struct Memcontrol {
+  int failnext;
   unsigned long numblocks;
   unsigned long total;
   unsigned long maxmem;
   unsigned long memlimit;
   unsigned long countlimit;
-  unsigned long objcount[LUA_NUMTAGS];
+  unsigned long objcount[LUA_NUMTYPES];
 } Memcontrol;
 
 LUA_API Memcontrol l_memcontrol;
@@ -77,7 +68,13 @@ extern void *l_Trick;
 /*
 ** Function to traverse and check all memory used by Lua
 */
-int lua_checkmemory (lua_State *L);
+LUAI_FUNC int lua_checkmemory (lua_State *L);
+
+/*
+** Function to print an object GC-friendly
+*/
+struct GCObject;
+LUAI_FUNC void lua_printobj (lua_State *L, struct GCObject *o);
 
 
 /* test for lock/unlock */
@@ -105,9 +102,10 @@ LUA_API void *debug_realloc (void *ud, void *block,
                              size_t osize, size_t nsize);
 
 #if defined(lua_c)
-#define luaL_newstate()		lua_newstate(debug_realloc, &l_memcontrol)
-#define luaL_openlibs(L)  \
-  { (luaL_openlibs)(L); \
+#define luaL_newstate()  \
+	lua_newstate(debug_realloc, &l_memcontrol, luaL_makeseed(NULL))
+#define luai_openlibs(L)  \
+  {  luaL_openlibs(L); \
      luaL_requiref(L, "T", luaB_opentests, 1); \
      lua_pop(L, 1); }
 #endif
@@ -121,18 +119,34 @@ LUA_API void *debug_realloc (void *ud, void *block,
 #define MINSTRTABSIZE		2
 #define MAXIWTHABS		3
 
+#define STRCACHE_N	23
+#define STRCACHE_M	5
+
+#undef LUAI_USER_ALIGNMENT_T
+#define LUAI_USER_ALIGNMENT_T   union { char b[sizeof(void*) * 8]; }
+
+
+/*
+** This one is not compatible with tests for opcode optimizations,
+** as it blocks some optimizations
+#define MAXINDEXRK	0
+*/
+
 
 /* make stack-overflow tests run faster */
 #undef LUAI_MAXSTACK
 #define LUAI_MAXSTACK   50000
 
 
-#undef LUAI_USER_ALIGNMENT_T
-#define LUAI_USER_ALIGNMENT_T   union { char b[sizeof(void*) * 8]; }
+/* test mode uses more stack space */
+#undef LUAI_MAXCCALLS
+#define LUAI_MAXCCALLS	180
 
 
-#define STRCACHE_N	23
-#define STRCACHE_M	5
+/* force Lua to use its own implementations */
+#undef lua_strx2number
+#undef lua_number2strx
+
 
 #endif
 

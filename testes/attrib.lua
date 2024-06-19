@@ -28,7 +28,7 @@ do
   local path = table.concat(t, ";")
   -- use that path in a search
   local s, err = package.searchpath("xuxu", path)
-  -- search fails; check that message has an occurence of
+  -- search fails; check that message has an occurrence of
   -- '??????????' with ? replaced by xuxu and at least 'max' lines
   assert(not s and
          string.find(err, string.rep("xuxu", 10)) and
@@ -47,6 +47,29 @@ do
   package.path = oldpath
 end
 
+
+do  print"testing 'require' message"
+  local oldpath = package.path
+  local oldcpath = package.cpath
+
+  package.path = "?.lua;?/?"
+  package.cpath = "?.so;?/init"
+
+  local st, msg = pcall(require, 'XXX')
+
+  local expected = [[module 'XXX' not found:
+	no field package.preload['XXX']
+	no file 'XXX.lua'
+	no file 'XXX/XXX'
+	no file 'XXX.so'
+	no file 'XXX/init']]
+
+  assert(msg == expected)
+
+  package.path = oldpath
+  package.cpath = oldcpath
+end
+
 print('+')
 
 
@@ -62,7 +85,7 @@ local DIR = "libs" .. dirsep
 
 -- prepend DIR to a name and correct directory separators
 local function D (x)
-  x = string.gsub(x, "/", dirsep)
+  local x = string.gsub(x, "/", dirsep)
   return DIR .. x
 end
 
@@ -83,7 +106,7 @@ local function createfiles (files, preextras, posextras)
   end
 end
 
-function removefiles (files)
+local function removefiles (files)
   for n in pairs(files) do
     os.remove(D(n))
   end
@@ -122,18 +145,18 @@ local oldpath = package.path
 
 package.path = string.gsub("D/?.lua;D/?.lc;D/?;D/??x?;D/L", "D/", DIR)
 
-local try = function (p, n, r)
+local try = function (p, n, r, ext)
   NAME = nil
-  local rr = require(p)
+  local rr, x = require(p)
   assert(NAME == n)
   assert(REQUIRED == p)
   assert(rr == r)
+  assert(ext == x)
 end
 
-a = require"names"
+local a = require"names"
 assert(a[1] == "names" and a[2] == D"names.lua")
 
-_G.a = nil
 local st, msg = pcall(require, "err")
 assert(not st and string.find(msg, "arithmetic") and B == 15)
 st, msg = pcall(require, "synerr")
@@ -143,30 +166,31 @@ assert(package.searchpath("C", package.path) == D"C.lua")
 assert(require"C" == 25)
 assert(require"C" == 25)
 AA = nil
-try('B', 'B.lua', true)
+try('B', 'B.lua', true, "libs/B.lua")
 assert(package.loaded.B)
 assert(require"B" == true)
 assert(package.loaded.A)
 assert(require"C" == 25)
 package.loaded.A = nil
-try('B', nil, true)   -- should not reload package
-try('A', 'A.lua', true)
+try('B', nil, true, nil)   -- should not reload package
+try('A', 'A.lua', true, "libs/A.lua")
 package.loaded.A = nil
 os.remove(D'A.lua')
 AA = {}
-try('A', 'A.lc', AA)  -- now must find second option
+try('A', 'A.lc', AA, "libs/A.lc")  -- now must find second option
 assert(package.searchpath("A", package.path) == D"A.lc")
 assert(require("A") == AA)
 AA = false
-try('K', 'L', false)     -- default option
-try('K', 'L', false)     -- default option (should reload it)
+try('K', 'L', false, "libs/L")     -- default option
+try('K', 'L', false, "libs/L")     -- default option (should reload it)
 assert(rawget(_G, "_REQUIREDNAME") == nil)
 
 AA = "x"
-try("X", "XXxX", AA)
+try("X", "XXxX", AA, "libs/XXxX")
 
 
 removefiles(files)
+NAME, REQUIRED, AA, B = nil
 
 
 -- testing require of sub-packages
@@ -183,21 +207,23 @@ files = {
 createfiles(files, "_ENV = {}\n", "\nreturn _ENV\n")
 AA = 0
 
-local m = assert(require"P1")
+local m, ext = assert(require"P1")
+assert(ext == "libs/P1/init.lua")
 assert(AA == 0 and m.AA == 10)
 assert(require"P1" == m)
 assert(require"P1" == m)
 
 assert(package.searchpath("P1.xuxu", package.path) == D"P1/xuxu.lua")
-m.xuxu = assert(require"P1.xuxu")
+m.xuxu, ext = assert(require"P1.xuxu")
 assert(AA == 0 and m.xuxu.AA == 20)
+assert(ext == "libs/P1/xuxu.lua")
 assert(require"P1.xuxu" == m.xuxu)
 assert(require"P1.xuxu" == m.xuxu)
 assert(require"P1" == m and m.AA == 10)
 
 
 removefiles(files)
-
+AA = nil
 
 package.path = ""
 assert(not pcall(require, "file_does_not_exist"))
@@ -210,7 +236,7 @@ package.path = oldpath
 local fname = "file_does_not_exist2"
 local m, err = pcall(require, fname)
 for t in string.gmatch(package.path..";"..package.cpath, "[^;]+") do
-  t = string.gsub(t, "?", fname)
+  local t = string.gsub(t, "?", fname)
   assert(string.find(err, t, 1, true))
 end
 
@@ -267,16 +293,19 @@ else
 
   -- test C modules with prefixes in names
   package.cpath = DC"?"
-  local lib2 = require"lib2-v2"
+  local lib2, ext = require"lib2-v2"
+  assert(string.find(ext, "libs/lib2-v2", 1, true))
   -- check correct access to global environment and correct
   -- parameters
   assert(_ENV.x == "lib2-v2" and _ENV.y == DC"lib2-v2")
-  assert(lib2.id("x") == "x")
+  assert(lib2.id("x") == true)   -- a different "id" implementation
 
   -- test C submodules
-  local fs = require"lib1.sub"
+  local fs, ext = require"lib1.sub"
   assert(_ENV.x == "lib1.sub" and _ENV.y == DC"lib1")
+  assert(string.find(ext, "libs/lib1", 1, true))
   assert(fs.id(45) == 45)
+  _ENV.x, _ENV.y = nil
 end
 
 _ENV = _G
@@ -293,10 +322,10 @@ do
     return _ENV
   end
 
-  local pl = require"pl"
+  local pl, ext = require"pl"
   assert(require"pl" == pl)
   assert(pl.xuxu(10) == 30)
-  assert(pl[1] == "pl" and pl[2] == nil)
+  assert(pl[1] == "pl" and pl[2] == ":preload:" and ext == ":preload:")
 
   package = p
   assert(type(package.path) == "string")
@@ -310,10 +339,10 @@ print("testing assignments, logical operators, and constructors")
 
 local res, res2 = 27
 
-a, b = 1, 2+3
+local a, b = 1, 2+3
 assert(a==1 and b==5)
 a={}
-function f() return 10, 11, 12 end
+local function f() return 10, 11, 12 end
 a.x, b, a[1] = 1, 2, f()
 assert(a.x==1 and b==2 and a[1]==10)
 a[f()], b, a[f()+3] = f(), a, 'x'
@@ -325,15 +354,15 @@ do
   local a,b,c
   a,b = 0, f(1)
   assert(a == 0 and b == 1)
-  A,b = 0, f(1)
-  assert(A == 0 and b == 1)
+  a,b = 0, f(1)
+  assert(a == 0 and b == 1)
   a,b,c = 0,5,f(4)
   assert(a==0 and b==5 and c==1)
   a,b,c = 0,5,f(0)
   assert(a==0 and b==5 and c==nil)
 end
 
-a, b, c, d = 1 and nil, 1 or nil, (1 and (nil or 1)), 6
+local a, b, c, d = 1 and nil, 1 or nil, (1 and (nil or 1)), 6
 assert(not a and b and c and d==6)
 
 d = 20
@@ -391,6 +420,7 @@ assert(not pcall(function () local a = {[nil] = 10} end))
 assert(a[nil] == undef)
 a = nil
 
+local a, b, c
 a = {10,9,8,7,6,5,4,3,2; [-3]='a', [f]=print, a='a', b='ab'}
 a, a.x, a.y = a, a[-3]
 assert(a[1]==10 and a[-3]==a.a and a[f]==print and a.x=='a' and not a.y)
@@ -406,6 +436,16 @@ a.aVeryLongName012345678901234567890123456789012345678901234567890123456789 ==
 10)
 
 
+do
+  -- _ENV constant
+  local function foo ()
+    local _ENV <const> = 11
+    X = "hi"
+  end
+  local st, msg = pcall(foo)
+  assert(not st and string.find(msg, "number"))
+end
+
 
 -- test of large float/integer indices 
 
@@ -417,7 +457,7 @@ while maxint ~= (maxint + 0.0) or (maxint - 1) ~= (maxint - 1.0) do
   maxint = maxint // 2
 end
 
-maxintF = maxint + 0.0   -- float version
+local maxintF = maxint + 0.0   -- float version
 
 assert(maxintF == maxint and math.type(maxintF) == "float" and
        maxintF >= 2.0^14)

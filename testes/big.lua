@@ -32,7 +32,7 @@ setmetatable(env, {
 })
 
 X = nil
-co = coroutine.wrap(f)
+local co = coroutine.wrap(f)
 assert(co() == 's')
 assert(co() == 'g')
 assert(co() == 'g')
@@ -66,7 +66,7 @@ assert(repstrings * ssize > 2.0^32)  -- it should be larger than maximum size
 
 local longs = string.rep("\0", ssize)   -- create one long string
 
--- create function to concatentate 'repstrings' copies of its argument
+-- create function to concatenate 'repstrings' copies of its argument
 local rep = assert(load(
   "local a = ...; return " .. string.rep("a", repstrings, "..")))
 

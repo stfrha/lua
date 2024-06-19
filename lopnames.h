@@ -7,6 +7,9 @@
 #if !defined(lopnames_h)
 #define lopnames_h
 
+#include <stddef.h>
+
+
 /* ORDER OP */
 
 static const char *const opnames[] = {
@@ -15,7 +18,9 @@ static const char *const opnames[] = {
   "LOADF",
   "LOADK",
   "LOADKX",
-  "LOADBOOL",
+  "LOADFALSE",
+  "LFALSESKIP",
+  "LOADTRUE",
   "LOADNIL",
   "GETUPVAL",
   "SETUPVAL",
@@ -30,12 +35,6 @@ static const char *const opnames[] = {
   "NEWTABLE",
   "SELF",
   "ADDI",
-  "SUBI",
-  "MULI",
-  "MODI",
-  "POWI",
-  "DIVI",
-  "IDIVI",
   "ADDK",
   "SUBK",
   "MULK",
@@ -60,6 +59,9 @@ static const char *const opnames[] = {
   "BXOR",
   "SHL",
   "SHR",
+  "MMBIN",
+  "MMBINI",
+  "MMBINK",
   "UNM",
   "BNOT",
   "NOT",
@@ -84,8 +86,6 @@ static const char *const opnames[] = {
   "RETURN",
   "RETURN0",
   "RETURN1",
-  "FORLOOP1",
-  "FORPREP1",
   "FORLOOP",
   "FORPREP",
   "TFORPREP",
@@ -94,7 +94,7 @@ static const char *const opnames[] = {
   "SETLIST",
   "CLOSURE",
   "VARARG",
-  "PREPVARARG",
+  "VARARGPREP",
   "EXTRAARG",
   NULL
 };
